@@ -40,9 +40,9 @@ const requestStatusMeta: Record<
 }
 
 const roleActions: Record<UserRole, string[]> = {
-  admin: ["新增/停用账号", "审核需求并分配运营", "确认模特与视频资源权限"],
-  operator: ["接收并制作视频任务", "更新制作状态", "同步交付结果给商家"],
-  user: ["提交商品 Brief", "选择目标模特", "跟踪带货素材进度"],
+  admin: ["新增/停用账号", "审核需求并分配运营", "配置模特/产品/指令资源库"],
+  operator: ["接收并制作视频任务", "更新制作状态", "维护资源库并同步交付结果"],
+  user: ["提交商品 Brief", "查看模特库", "维护自己的产品资源"],
 }
 
 function formatDate(value: string) {
@@ -138,6 +138,16 @@ export default async function WorkspacePage() {
                   <div className="text-sm font-sans tracking-wide leading-relaxed">{action}</div>
                 </div>
               ))}
+            </div>
+            <div>
+              <Button
+                variant="outline"
+                className="rounded-none border-black px-6 py-6 text-sm uppercase tracking-widest hover:bg-neutral-100 transition-colors"
+                render={<Link href="/workspace/resources" />}
+                nativeButton={false}
+              >
+                进入资源库
+              </Button>
             </div>
           </div>
 

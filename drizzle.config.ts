@@ -12,6 +12,8 @@ export default defineConfig({
     "images",
     "videos",
     "campaign_requests",
+    "resource_products",
+    "resource_instructions",
   ],
   dbCredentials: {
     url: process.env.DATABASE_URL ?? "",

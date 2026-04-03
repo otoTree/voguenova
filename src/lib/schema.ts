@@ -44,8 +44,23 @@ export const images = pgTable("images", {
   modelId: uuid("model_id").references(() => models.id, {
     onDelete: "cascade",
   }),
+  productId: uuid("product_id").references(() => resourceProducts.id, {
+    onDelete: "set null",
+  }),
   imageUrl: text("image_url").notNull(),
   prompt: text("prompt"),
+  sourceType: varchar("source_type", { length: 50 }).notNull().default("generated"),
+  generationMode: varchar("generation_mode", { length: 50 })
+    .notNull()
+    .default("text-to-image"),
+  assetCategory: varchar("asset_category", { length: 50 })
+    .notNull()
+    .default("retouch"),
+  variantLabel: varchar("variant_label", { length: 255 }),
+  referenceImageUrls: text("reference_image_urls"),
+  createdByUserId: uuid("created_by_user_id").references(() => appUsers.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -84,6 +99,42 @@ export const campaignRequests = pgTable("campaign_requests", {
   productName: varchar("product_name", { length: 255 }).notNull(),
   brief: text("brief"),
   status: varchar("status", { length: 50 }).notNull().default("submitted"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+})
+
+export const resourceProducts = pgTable("resource_products", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  ownerUserId: uuid("owner_user_id")
+    .notNull()
+    .references(() => appUsers.id, {
+      onDelete: "cascade",
+    }),
+  name: varchar("name", { length: 255 }).notNull(),
+  brand: varchar("brand", { length: 255 }),
+  sku: varchar("sku", { length: 255 }),
+  imageUrl: text("image_url"),
+  description: text("description"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+})
+
+export const resourceInstructions = pgTable("resource_instructions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  title: varchar("title", { length: 255 }).notNull(),
+  category: varchar("category", { length: 100 }).notNull().default("general"),
+  content: text("content").notNull(),
+  createdByUserId: uuid("created_by_user_id").references(() => appUsers.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

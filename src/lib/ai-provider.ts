@@ -23,7 +23,10 @@ export async function generateTextWithCloubic(messages: Message[], model = "gpt-
   });
 
   if (!response.ok) {
-    throw new Error(`Cloubic API Error: ${response.statusText}`);
+    const details = await response.text();
+    throw new Error(
+      `Cloubic API Error: ${response.status} ${response.statusText}${details ? ` - ${details}` : ""}`
+    );
   }
 
   const data = await response.json();
@@ -63,7 +66,10 @@ export async function generateImageWithCloubic(prompt: string, referenceImageUrl
   });
 
   if (!response.ok) {
-    throw new Error(`Cloubic API Error: ${response.statusText}`);
+    const details = await response.text();
+    throw new Error(
+      `Cloubic API Error: ${response.status} ${response.statusText}${details ? ` - ${details}` : ""}`
+    );
   }
 
   const data = await response.json();
@@ -78,7 +84,7 @@ export async function generateImageWithCloubic(prompt: string, referenceImageUrl
     try {
       const parsed = JSON.parse(content);
       imageUrl = parsed.imageUrl || parsed.url || content;
-    } catch (e) {
+    } catch {
       // fallback
     }
   }
@@ -108,7 +114,10 @@ export async function generateVideoWithCloubic(prompt: string, imageUrl: string[
   });
 
   if (!response.ok) {
-    throw new Error(`Cloubic API Error: ${response.statusText}`);
+    const details = await response.text();
+    throw new Error(
+      `Cloubic API Error: ${response.status} ${response.statusText}${details ? ` - ${details}` : ""}`
+    );
   }
 
   const data = await response.json();
@@ -125,7 +134,10 @@ export async function getVideoStatusWithCloubic(taskId: string) {
   });
 
   if (!response.ok) {
-    throw new Error(`Cloubic API Error: ${response.statusText}`);
+    const details = await response.text();
+    throw new Error(
+      `Cloubic API Error: ${response.status} ${response.statusText}${details ? ` - ${details}` : ""}`
+    );
   }
 
   const data = await response.json();
