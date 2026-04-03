@@ -1,4 +1,5 @@
 import {
+  integer,
   text,
   timestamp,
   uuid,
@@ -74,6 +75,87 @@ export const videos = pgTable("videos", {
   taskId: varchar("task_id", { length: 255 }).notNull(),
   videoUrl: text("video_url"),
   status: varchar("status", { length: 50 }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+})
+
+export const videoProjects = pgTable("video_projects", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  ownerUserId: uuid("owner_user_id").references(() => appUsers.id, {
+    onDelete: "cascade",
+  }),
+  title: varchar("title", { length: 255 }).notNull().default("未命名项目"),
+  brief: text("brief"),
+  status: varchar("status", { length: 50 }).notNull().default("draft"),
+  selectedModelId: uuid("selected_model_id").references(() => models.id, {
+    onDelete: "set null",
+  }),
+  selectedProductId: uuid("selected_product_id").references(() => resourceProducts.id, {
+    onDelete: "set null",
+  }),
+  selectedInstructionIds: text("selected_instruction_ids"),
+  externalReferenceUrls: text("external_reference_urls"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+})
+
+export const videoProjectScenes = pgTable("video_project_scenes", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => videoProjects.id, {
+      onDelete: "cascade",
+    }),
+  sortOrder: integer("sort_order").notNull().default(0),
+  title: varchar("title", { length: 255 }).notNull(),
+  duration: integer("duration").notNull().default(4),
+  visualPrompt: text("visual_prompt"),
+  camera: text("camera"),
+  motion: text("motion"),
+  transition: text("transition"),
+  voiceover: text("voiceover"),
+  referenceUrls: text("reference_urls"),
+  soundMode: varchar("sound_mode", { length: 50 }).notNull().default("off"),
+  aspectRatio: varchar("aspect_ratio", { length: 20 }).notNull().default("9:16"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+})
+
+export const videoGenerations = pgTable("video_generations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => videoProjects.id, {
+      onDelete: "cascade",
+    }),
+  sceneId: uuid("scene_id")
+    .notNull()
+    .references(() => videoProjectScenes.id, {
+      onDelete: "cascade",
+    }),
+  taskId: varchar("task_id", { length: 255 }).notNull(),
+  provider: varchar("provider", { length: 50 }).notNull().default("cloubic"),
+  prompt: text("prompt"),
+  duration: integer("duration").notNull().default(4),
+  status: varchar("status", { length: 50 }).notNull().default("processing"),
+  progress: integer("progress"),
+  videoUrl: text("video_url"),
+  errorMessage: text("error_message"),
+  createdByUserId: uuid("created_by_user_id").references(() => appUsers.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

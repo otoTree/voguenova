@@ -144,11 +144,19 @@ export async function getVideoStatusWithCloubic(taskId: string) {
   
   // Handle both response structures
   const statusData = data.data || data;
+  const errorMessage =
+    statusData.error?.message ||
+    statusData.error_message ||
+    statusData.fail_reason ||
+    statusData.reason ||
+    statusData.message ||
+    "";
   
   return {
     id: statusData.id || statusData.task_id,
     status: statusData.status,
     videoUrl: statusData.url,
-    progress: statusData.progress
+    progress: statusData.progress,
+    errorMessage: String(errorMessage || "").trim(),
   };
 }

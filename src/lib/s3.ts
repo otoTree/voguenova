@@ -10,6 +10,12 @@ const publicUrlPrefix = process.env.S3_PUBLIC_URL_PREFIX || ""
 
 export const storageBucketName = bucketName
 
+function assertStorageConfigured() {
+  if (!accessKeyId || !secretAccessKey) {
+    throw new Error("S3 未配置，无法上传真实文件。")
+  }
+}
+
 export const s3Client = new S3Client({
   region,
   endpoint,
@@ -24,10 +30,7 @@ export async function uploadFileToS3(
   file: File,
   folder: string = "uploads"
 ): Promise<string> {
-  if (!accessKeyId || !secretAccessKey) {
-    console.warn("S3 credentials not found, skipping actual upload and returning mock URL")
-    return `https://mock-s3-bucket.s3.amazonaws.com/${folder}/${uuidv4()}-${file.name}`
-  }
+  assertStorageConfigured()
 
   const fileExtension = file.name.split(".").pop() || ""
   const fileName = `${uuidv4()}.${fileExtension}`
@@ -48,6 +51,8 @@ export async function uploadRemoteFileToS3(
   sourceUrl: string,
   folder: string = "uploads"
 ) {
+  assertStorageConfigured()
+
   const normalizedSource = sourceUrl.trim()
   const dataPayload = await resolveRemoteSource(normalizedSource)
   const extension = resolveExtensionFromContentType(dataPayload.contentType)
@@ -153,15 +158,6 @@ function detectBase64ContentType(base64: string) {
 }
 
 function buildObjectAccessUrl(key: string) {
-  const encodedKey = key
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/")
-
-  if (endpoint) {
-    return `/api/storage/${encodedKey}`
-  }
-
   if (publicUrlPrefix) {
     return `${publicUrlPrefix.replace(/\/$/, "")}/${key}`
   }
@@ -172,4 +168,28 @@ function buildObjectAccessUrl(key: string) {
   }
 
   return `https://${bucketName}.s3.${region}.amazonaws.com/${key}`
+}
+
+export function resolvePublicAssetUrl(input: string) {
+  const normalized = input.trim()
+
+  if (!normalized) {
+    return ""
+  }
+
+  if (/^https?:\/\//i.test(normalized)) {
+    return normalized
+  }
+
+  if (!normalized.startsWith("/api/storage/")) {
+    return normalized
+  }
+
+  const encodedKey = normalized.replace(/^\/api\/storage\//, "")
+  const key = encodedKey
+    .split("/")
+    .map((segment) => decodeURIComponent(segment))
+    .join("/")
+
+  return buildObjectAccessUrl(key)
 }
