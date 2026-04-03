@@ -1,0 +1,19 @@
+import "dotenv/config"
+
+import { defineConfig } from "drizzle-kit"
+
+export default defineConfig({
+  schema: "./src/lib/schema.ts",
+  out: "./drizzle",
+  dialect: "postgresql",
+  tablesFilter: [
+    "app_users",
+    "models",
+    "images",
+    "videos",
+    "campaign_requests",
+  ],
+  dbCredentials: {
+    url: process.env.DATABASE_URL ?? "",
+  },
+})

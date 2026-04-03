@@ -31,7 +31,7 @@ export async function generateTextWithCloubic(messages: Message[], model = "gpt-
 }
 
 // 2. 图片生成
-export async function generateImageWithCloubic(prompt: string, referenceImageUrl?: string, n = 1) {
+export async function generateImageWithCloubic(prompt: string, referenceImageUrl?: string[], n = 1) {
   const messages: Message[] = [];
   
   if (referenceImageUrl) {
@@ -39,7 +39,7 @@ export async function generateImageWithCloubic(prompt: string, referenceImageUrl
       role: "user",
       content: [
         { type: "text", text: prompt },
-        { type: "image_url", image_url: { url: referenceImageUrl } }
+        ...referenceImageUrl.map(url => ({ type: "image_url", image_url: { url } }))
       ]
     });
   } else {
@@ -58,7 +58,7 @@ export async function generateImageWithCloubic(prompt: string, referenceImageUrl
     body: JSON.stringify({
       model: "gemini-3-pro-image-preview",
       messages,
-      n
+      n,
     })
   });
 
@@ -87,7 +87,7 @@ export async function generateImageWithCloubic(prompt: string, referenceImageUrl
 }
 
 // 3. 视频生成
-export async function generateVideoWithCloubic(prompt: string, imageUrl: string, duration = 5) {
+export async function generateVideoWithCloubic(prompt: string, imageUrl: string[], duration = 5,sound: string,aspect_ratio: string) {
   const response = await fetch(`${CLOUBIC_BASE_URL}/video/generations`, {
     method: "POST",
     headers: {
@@ -98,12 +98,11 @@ export async function generateVideoWithCloubic(prompt: string, imageUrl: string,
       model: "kling-v3-omni-pro",
       prompt,
       duration,
-      image_url: imageUrl,
       metadata: {
         multi_shot: false,
-        aspect_ratio: "9:16",
-        sound: "off",
-        image_list: [{ image_url: imageUrl }]
+        aspect_ratio,
+        sound,
+        image_list: imageUrl.map(url => ({ image_url: url }))
       }
     })
   });
@@ -137,7 +136,7 @@ export async function getVideoStatusWithCloubic(taskId: string) {
   return {
     id: statusData.id || statusData.task_id,
     status: statusData.status,
-    videoUrl: statusData.video_url,
+    videoUrl: statusData.url,
     progress: statusData.progress
   };
 }

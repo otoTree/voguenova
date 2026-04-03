@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { generateTextWithCloubic } from '@/lib/ai-provider';
+import { models } from '@/lib/schema';
 
 export async function POST(req: Request) {
   try {
@@ -20,12 +21,25 @@ export async function POST(req: Request) {
     ]);
 
     // Save to Postgres
-    const result = await db.query(
-      `INSERT INTO models (name, style, backstory) VALUES ($1, $2, $3) RETURNING *`,
-      [name, style, aiResponse]
-    );
+    const [model] = await db
+      .insert(models)
+      .values({
+        name,
+        style,
+        backstory: aiResponse,
+      })
+      .returning({
+        id: models.id,
+        name: models.name,
+        style: models.style,
+        backstory: models.backstory,
+        avatar_url: models.avatarUrl,
+        created_by_user_id: models.createdByUserId,
+        assigned_operator_id: models.assignedOperatorId,
+        created_at: models.createdAt,
+      });
 
-    return NextResponse.json({ success: true, model: result.rows[0] });
+    return NextResponse.json({ success: true, model });
   } catch (error: unknown) {
     console.error('Error generating persona:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
