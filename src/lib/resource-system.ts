@@ -370,7 +370,11 @@ function normalizeOptionalText(value: string | null | undefined) {
 }
 
 function resolveActorUserId(actor: AppUser) {
-  return actor.role === "admin" ? null : actor.id
+  if (actor.role === "admin") {
+    return null
+  }
+
+  return normalizeOptionalText(actor.id)
 }
 
 function mapUserOption(row: UserOptionRecord): ResourceUserOption {

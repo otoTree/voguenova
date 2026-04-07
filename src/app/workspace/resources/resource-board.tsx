@@ -940,6 +940,9 @@ function VideoStudio({
     [availableReferences]
   )
   const [uploadedReferenceFiles, setUploadedReferenceFiles] = React.useState<File[]>([])
+  const [isCreatingProject, setIsCreatingProject] = React.useState(false)
+  const [createProjectTitle, setCreateProjectTitle] = React.useState("")
+  const [createProjectBrief, setCreateProjectBrief] = React.useState("")
   const [projectTitle, setProjectTitle] = React.useState("")
   const [creativeBrief, setCreativeBrief] = React.useState("")
   const [projectSummaries, setProjectSummaries] = React.useState<ResourceVideoProjectSummary[]>([])
@@ -986,6 +989,8 @@ function VideoStudio({
         : projectSummaries.filter((item) => item.status === projectStatusFilter),
     [projectStatusFilter, projectSummaries]
   )
+  const hasActiveProject = Boolean(currentProjectId)
+  const isEditingProject = hasActiveProject && !isCreatingProject
   const currentProjectSummary = React.useMemo(
     () => projectSummaries.find((item) => item.id === currentProjectId) ?? null,
     [currentProjectId, projectSummaries]
@@ -1029,9 +1034,38 @@ function VideoStudio({
     }
   }, [])
 
+  const resetProjectWorkspace = React.useCallback(() => {
+    shouldSkipNextAutosaveRef.current = true
+    lastSavedDraftSignatureRef.current = ""
+    setIsCreatingProject(false)
+    setCreateProjectTitle("")
+    setCreateProjectBrief("")
+    setCurrentProjectId(null)
+    setProjectTitle("")
+    setCreativeBrief("")
+    setStoryboardScenes([])
+    setVideoTasks([])
+    setActiveSceneId(null)
+    setActivePreviewSceneId(null)
+    onSelectModel("")
+    onSelectProduct("")
+    onSetExternalReferenceUrls([])
+    onSetSelectedInstructionIds([])
+    setAutoSaveMessage("")
+    setLastAutoSavedAt(null)
+  }, [
+    onSelectModel,
+    onSelectProduct,
+    onSetExternalReferenceUrls,
+    onSetSelectedInstructionIds,
+  ])
+
   const applyProject = React.useCallback(
     (project: ResourceVideoProject) => {
       shouldSkipNextAutosaveRef.current = true
+      setIsCreatingProject(false)
+      setCreateProjectTitle("")
+      setCreateProjectBrief("")
       setCurrentProjectId(project.id)
       setProjectTitle(project.title)
       setCreativeBrief(project.brief ?? "")
@@ -1099,8 +1133,12 @@ function VideoStudio({
       brief?: string
       scenes?: StoryboardScene[]
     }) => {
+      if (!currentProjectId) {
+        throw new Error("请先创建项目，再编辑影棚内容。")
+      }
+
       const payload = {
-        id: currentProjectId ?? undefined,
+        id: currentProjectId,
         title: (overrides?.title ?? projectTitle).trim() || "未命名项目",
         brief: (overrides?.brief ?? creativeBrief).trim(),
         status: "draft",
@@ -1245,6 +1283,7 @@ function VideoStudio({
         const firstProjectId = projects[0]?.id
 
         if (!firstProjectId) {
+          resetProjectWorkspace()
           return
         }
 
@@ -1275,9 +1314,13 @@ function VideoStudio({
     return () => {
       isCancelled = true
     }
-  }, [applyProject])
+  }, [applyProject, resetProjectWorkspace])
 
   React.useEffect(() => {
+    if (!currentProjectId) {
+      return
+    }
+
     if (isLoadingProject || isSavingProject || isSubmittingVideos) {
       return
     }
@@ -1299,6 +1342,7 @@ function VideoStudio({
 
     return () => window.clearTimeout(timer)
   }, [
+    currentProjectId,
     currentDraftSignature,
     isLoadingProject,
     isSavingProject,
@@ -1475,6 +1519,11 @@ function VideoStudio({
   }
 
   async function handleGenerateStoryboard() {
+    if (!currentProjectId) {
+      setStoryboardError("请先创建项目，再生成分镜。")
+      return
+    }
+
     setIsGeneratingStoryboard(true)
     setStoryboardError("")
     setStoryboardNotice("")
@@ -1545,6 +1594,11 @@ function VideoStudio({
   }
 
   async function generateVideosForScenes(targetScenes: StoryboardScene[]) {
+    if (!currentProjectId) {
+      setVideoError("请先创建项目，再提交视频生成任务。")
+      return
+    }
+
     if (!canGenerate || !targetScenes.length) {
       return
     }
@@ -1636,6 +1690,7 @@ function VideoStudio({
     }
 
     setIsLoadingProject(true)
+    setIsCreatingProject(false)
     setStoryboardError("")
 
     try {
@@ -1780,7 +1835,7 @@ function VideoStudio({
       if (nextSummaries[0]?.id) {
         await handleSelectProject(nextSummaries[0].id)
       } else {
-        handleCreateProject()
+        resetProjectWorkspace()
       }
     } catch (error: unknown) {
       setStoryboardError(
@@ -1792,19 +1847,63 @@ function VideoStudio({
   }
 
   function handleCreateProject() {
-    shouldSkipNextAutosaveRef.current = true
-    lastSavedDraftSignatureRef.current = ""
-    setCurrentProjectId(null)
-    setProjectTitle("未命名项目")
-    setCreativeBrief("")
-    setStoryboardScenes([])
-    setVideoTasks([])
-    setActiveSceneId(null)
-    setActivePreviewSceneId(null)
-    onSetExternalReferenceUrls([])
-    onSetSelectedInstructionIds([])
-    setAutoSaveMessage("")
-    setLastAutoSavedAt(null)
+    setIsCreatingProject(true)
+    setStoryboardError("")
+    setStoryboardNotice("")
+    setCreateProjectTitle("")
+    setCreateProjectBrief("")
+  }
+
+  function handleCancelCreateProject() {
+    setIsCreatingProject(false)
+    setCreateProjectTitle("")
+    setCreateProjectBrief("")
+  }
+
+  async function handleSubmitCreateProject() {
+    const nextTitle = createProjectTitle.trim()
+
+    if (!nextTitle) {
+      setStoryboardError("请输入项目名称。")
+      return
+    }
+
+    setIsSavingProject(true)
+    setStoryboardError("")
+
+    try {
+      const response = await fetch("/api/resources/video-projects", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title: nextTitle,
+          brief: createProjectBrief.trim(),
+          status: "draft",
+          selectedModelId: null,
+          selectedProductId: null,
+          selectedInstructionIds: [],
+          externalReferenceUrls: [],
+          scenes: [],
+        }),
+      })
+      const payload = await response.json()
+
+      if (!response.ok || !payload.success || !payload.project) {
+        throw new Error(payload.error || "项目创建失败。")
+      }
+
+      applyProject(payload.project as ResourceVideoProject)
+      setStoryboardNotice("项目已创建，可以开始编辑。")
+      await refreshProjectSummaries()
+    } catch (error: unknown) {
+      setStoryboardError(
+        error instanceof Error ? error.message : "项目创建失败，请稍后重试。"
+      )
+    } finally {
+      setIsSavingProject(false)
+    }
   }
 
   return (
@@ -1827,12 +1926,12 @@ function VideoStudio({
           <div className="space-y-2">
             <Label>项目切换</Label>
             <select
-              value={currentProjectId ?? ""}
+              value={isCreatingProject ? "" : currentProjectId ?? ""}
               onChange={(event) => void handleSelectProject(event.target.value)}
               className={selectClassName()}
-              disabled={isLoadingProject}
+              disabled={isLoadingProject || isCreatingProject}
             >
-              <option value="">新建未保存项目</option>
+              <option value="">请选择项目</option>
               {filteredProjectSummaries.map((project) => (
                 <option key={project.id} value={project.id}>
                   {`${project.title} · ${formatDate(project.updatedAt)}`}
@@ -1842,25 +1941,36 @@ function VideoStudio({
             <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
               <span>
                 最近更新：
-                {currentProjectSummary
+                {isCreatingProject
+                  ? "正在创建项目"
+                  : currentProjectSummary
                   ? formatRelativeTime(currentProjectSummary.updatedAt)
-                  : "未保存"}
+                  : "请先创建或打开项目"}
               </span>
               <span>
-                {autoSaveMessage ||
+                {isCreatingProject
+                  ? "创建完成后进入编辑"
+                  : autoSaveMessage ||
                   (lastAutoSavedAt
                     ? `自动保存：${formatRelativeTime(lastAutoSavedAt)}`
-                    : "自动保存已开启")}
+                    : "创建项目后自动保存")}
               </span>
             </div>
           </div>
-          <Button type="button" variant="outline" onClick={handleCreateProject}>
-            新建项目
+          <Button
+            type="button"
+            variant="outline"
+            onClick={
+              isCreatingProject ? handleCancelCreateProject : () => void handleCreateProject()
+            }
+            disabled={isSavingProject}
+          >
+            {isCreatingProject ? "取消创建" : "新建项目"}
           </Button>
           <Button
             type="button"
             onClick={() => void saveCurrentProject().catch(() => undefined)}
-            disabled={isSavingProject}
+            disabled={!isEditingProject || isSavingProject}
           >
             {isSavingProject ? "保存中..." : "保存项目"}
           </Button>
@@ -1955,7 +2065,7 @@ function VideoStudio({
             type="button"
             variant="outline"
             onClick={() => void handleRenameProject()}
-            disabled={!currentProjectId || isSavingProject}
+            disabled={!isEditingProject || isSavingProject}
           >
             重命名项目
           </Button>
@@ -1963,506 +2073,560 @@ function VideoStudio({
             type="button"
             variant="outline"
             onClick={() => void handleDeleteProject()}
-            disabled={!currentProjectId || isLoadingProject}
+            disabled={!isEditingProject || isLoadingProject}
           >
             删除项目
           </Button>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <Label>项目名称</Label>
-            <Input
-              value={projectTitle}
-              onChange={(event) => setProjectTitle(event.target.value)}
-              placeholder="例如：香水新品竖版短片"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>总时长</Label>
-            <div className="flex h-10 items-center rounded-md border px-3 text-sm">
-              {totalDuration} 秒 / {storyboardScenes.length} 个镜头
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-3 rounded-2xl border bg-muted/20 p-4">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-3">
-              <Label>项目提示词</Label>
-              <span className="text-xs text-muted-foreground">
-                可从提示词库插入，也可直接手动补充
-              </span>
-            </div>
-            <Textarea
-              value={creativeBrief}
-              onChange={(event) => setCreativeBrief(event.target.value)}
-              className="min-h-32"
-              placeholder="描述视频节奏、卖点、场景、风格、人物动作与镜头要求。"
-            />
-          </div>
-          <div className="space-y-3 rounded-2xl border bg-background/80 p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-medium">从提示词库添加到项目提示词</p>
-              <span className="text-xs text-muted-foreground">
-                {selectedInstructions.length ? "优先显示已启用提示词" : "当前显示全部提示词"}
-              </span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {promptLibraryItems.length ? (
-                promptLibraryItems.map((instruction) => (
-                  <Button
-                    key={`project-${instruction.id}`}
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                      setCreativeBrief((current) =>
-                        appendPromptBlock(
-                          current,
-                          `提示词库：${instruction.title}\n${instruction.content}`
-                        )
-                      )
-                    }
-                  >
-                    添加 {instruction.title}
-                  </Button>
-                ))
-              ) : (
-                <span className="text-sm text-muted-foreground">
-                  暂无可插入的提示词，请先在提示词库中创建内容。
-                </span>
-              )}
-            </div>
-          </div>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-medium">提示词库驱动的 AI 分镜</p>
-              <p className="text-xs text-muted-foreground">
-                分镜不走独立路由，直接通过通用 LLM 聊天接口生成。
+        {isCreatingProject ? (
+          <div className="space-y-4 rounded-2xl border bg-muted/20 p-5">
+            <div className="space-y-1">
+              <h3 className="font-medium">创建影棚项目</h3>
+              <p className="text-sm text-muted-foreground">
+                先完成项目创建，再进入分镜和视频编辑流程。
               </p>
             </div>
-            <Button
-              type="button"
-              onClick={handleGenerateStoryboard}
-              disabled={isGeneratingStoryboard}
-            >
-              {isGeneratingStoryboard ? "AI 生成中..." : "AI 生成分镜"}
-            </Button>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            AI 会结合项目提示词、提示词库内容、模特/产品设定和参考图一起生成分镜。
-          </p>
-        </div>
-
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <Label>当前镜头参考图</Label>
-              <p className="mt-1 text-xs text-muted-foreground">
-                每个分镜可独立选择不同参考图，当前操作仅作用于已选镜头。
-              </p>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>项目名称</Label>
+                <Input
+                  value={createProjectTitle}
+                  onChange={(event) => setCreateProjectTitle(event.target.value)}
+                  placeholder="例如：香水新品竖版短片"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>初始状态</Label>
+                <div className="flex h-10 items-center rounded-md border bg-background px-3 text-sm">
+                  草稿
+                </div>
+              </div>
             </div>
-            <span className="text-xs text-muted-foreground">
-              已选 {activeScene?.referenceUrls.length ?? 0} 张
-            </span>
-          </div>
-
-          {availableReferences.length ? (
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {availableReferences.map((reference) => {
-                const isActive = Boolean(activeScene?.referenceUrls.includes(reference.url))
-
-                return (
-                  <button
-                    key={reference.id}
-                    type="button"
-                    onClick={() =>
-                      activeScene ? toggleReferenceForScene(activeScene.id, reference.url) : null
-                    }
-                    disabled={!activeScene}
-                    className={`space-y-3 rounded-2xl border p-3 text-left ${
-                      isActive ? "border-primary bg-primary/5" : "bg-background"
-                    }`}
-                  >
-                    <AssetPreview
-                      imageUrl={reference.url}
-                      aspectClassName="aspect-square"
-                      fallback="REF"
-                    />
-                    <div className="space-y-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant={isActive ? "default" : "outline"}>
-                          {reference.label}
-                        </Badge>
-                        <Badge variant="secondary">{reference.category}</Badge>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        {isActive ? "已加入当前镜头" : "点击加入当前镜头"}
-                      </p>
-                    </div>
-                  </button>
-                )
-              })}
+            <div className="space-y-2">
+              <Label>项目简介</Label>
+              <Textarea
+                value={createProjectBrief}
+                onChange={(event) => setCreateProjectBrief(event.target.value)}
+                className="min-h-32"
+                placeholder="先记录项目目标、风格方向、主卖点和预期镜头语言。"
+              />
             </div>
-          ) : (
-            <div className="rounded-2xl border border-dashed px-4 py-5 text-sm text-muted-foreground">
-              当前没有可用参考图，可先在图片工作台生成视觉素材或从模特作品集中挑选。
-            </div>
-          )}
-        </div>
-
-        <div className="space-y-2">
-          <Label>补充上传参考图</Label>
-          <Input
-            type="file"
-            accept="image/*"
-            multiple
-            onChange={(event) =>
-              setUploadedReferenceFiles(Array.from(event.target.files ?? []))
-            }
-          />
-          {uploadedReferenceFiles.length ? (
-            <div className="flex flex-wrap gap-2">
-              {uploadedReferenceFiles.map((file) => (
-                <Badge key={`${file.name}-${file.size}`} variant="outline">
-                  {file.name}
-                </Badge>
-              ))}
-            </div>
-          ) : null}
-        </div>
-
-        <div className="space-y-4 rounded-2xl border bg-muted/20 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h3 className="font-medium">分镜时间轴</h3>
-              <p className="text-xs text-muted-foreground">
-                拖动镜头条目可调整先后顺序，时长会同步影响时间轴比例。
-              </p>
-            </div>
-            <Button type="button" variant="outline" size="sm" onClick={addScene}>
-              新增镜头
-            </Button>
-          </div>
-
-          <div className="flex gap-3 overflow-x-auto pb-1">
-            {storyboardScenes.map((scene, index) => {
-              const task = videoTasks.find((item) => item.sceneId === scene.id)
-
-              return (
-                <button
-                  key={scene.id}
-                  type="button"
-                  draggable
-                  onDragStart={() => setDraggingSceneId(scene.id)}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={() => {
-                    if (draggingSceneId) {
-                      reorderScenes(draggingSceneId, scene.id)
-                    }
-                    setDraggingSceneId(null)
-                  }}
-                  onDragEnd={() => setDraggingSceneId(null)}
-                  onClick={() => setActiveSceneId(scene.id)}
-                  className={`min-w-[180px] rounded-2xl border p-4 text-left ${
-                    activeSceneId === scene.id ? "border-primary bg-primary/5" : "bg-background"
-                  }`}
-                  style={{ flexBasis: `${Math.max(scene.duration * 14, 180)}px` }}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <Badge variant="outline">#{index + 1}</Badge>
-                    <span className="text-xs text-muted-foreground">{scene.duration}s</span>
-                  </div>
-                  <p className="mt-3 line-clamp-2 text-sm font-medium">{scene.title}</p>
-                  <p className="mt-2 line-clamp-3 text-xs text-muted-foreground">
-                    {scene.visualPrompt}
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {task?.videoUrl ? (
-                      <Badge>已完成</Badge>
-                    ) : task?.status === "processing" ? (
-                      <Badge variant="secondary">生成中</Badge>
-                    ) : null}
-                    <Badge variant="outline">{scene.soundMode}</Badge>
-                    <Badge variant="outline">{scene.aspectRatio}</Badge>
-                    <Badge variant="outline">参考 {scene.referenceUrls.length}</Badge>
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h3 className="font-medium">分镜脚本管理</h3>
-            <div className="flex gap-2">
-              {activeScene ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => generateVideosForScenes([activeScene])}
-                  disabled={
-                    !canGenerate ||
-                    isSubmittingVideos ||
-                    (activeScene.referenceUrls.length === 0 &&
-                      uploadedReferenceFiles.length === 0)
-                  }
-                >
-                  生成当前镜头
-                </Button>
-              ) : null}
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button type="button" variant="outline" onClick={handleCancelCreateProject}>
+                取消
+              </Button>
               <Button
                 type="button"
-                onClick={() => generateVideosForScenes(storyboardScenes)}
-                disabled={!canGenerate || isSubmittingVideos || storyboardScenes.length === 0}
+                onClick={() => void handleSubmitCreateProject()}
+                disabled={isSavingProject}
               >
-                {isSubmittingVideos ? "提交中..." : "生成全部镜头"}
+                {isSavingProject ? "创建中..." : "创建并进入编辑"}
               </Button>
             </div>
           </div>
+        ) : isEditingProject ? (
+          <>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>项目名称</Label>
+                <Input
+                  value={projectTitle}
+                  onChange={(event) => setProjectTitle(event.target.value)}
+                  placeholder="例如：香水新品竖版短片"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>总时长</Label>
+                <div className="flex h-10 items-center rounded-md border px-3 text-sm">
+                  {totalDuration} 秒 / {storyboardScenes.length} 个镜头
+                </div>
+              </div>
+            </div>
 
-          {storyboardScenes.length ? (
-            activeScene ? (
-              <div className="space-y-4 rounded-2xl border bg-card p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline">镜头 {activeSceneIndex + 1}</Badge>
-                    {activeSceneTask?.status === "processing" ? (
-                      <Badge variant="secondary">
-                        生成中
-                        {typeof activeSceneTask.progress === "number"
-                          ? ` ${activeSceneTask.progress}%`
-                          : ""}
-                      </Badge>
-                    ) : null}
-                    {activeSceneTask?.videoUrl ? <Badge>可预览</Badge> : null}
-                  </div>
-                  <div className="flex gap-2">
+            <div className="space-y-3 rounded-2xl border bg-muted/20 p-4">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <Label>项目提示词</Label>
+                  <span className="text-xs text-muted-foreground">
+                    可从提示词库插入，也可直接手动补充
+                  </span>
+                </div>
+                <Textarea
+                  value={creativeBrief}
+                  onChange={(event) => setCreativeBrief(event.target.value)}
+                  className="min-h-32"
+                  placeholder="描述视频节奏、卖点、场景、风格、人物动作与镜头要求。"
+                />
+              </div>
+              <div className="space-y-3 rounded-2xl border bg-background/80 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-medium">从提示词库添加到项目提示词</p>
+                  <span className="text-xs text-muted-foreground">
+                    {selectedInstructions.length ? "优先显示已启用提示词" : "当前显示全部提示词"}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {promptLibraryItems.length ? (
+                    promptLibraryItems.map((instruction) => (
+                      <Button
+                        key={`project-${instruction.id}`}
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          setCreativeBrief((current) =>
+                            appendPromptBlock(
+                              current,
+                              `提示词库：${instruction.title}\n${instruction.content}`
+                            )
+                          )
+                        }
+                      >
+                        添加 {instruction.title}
+                      </Button>
+                    ))
+                  ) : (
+                    <span className="text-sm text-muted-foreground">
+                      暂无可插入的提示词，请先在提示词库中创建内容。
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">提示词库驱动的 AI 分镜</p>
+                  <p className="text-xs text-muted-foreground">
+                    分镜不走独立路由，直接通过通用 LLM 聊天接口生成。
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  onClick={handleGenerateStoryboard}
+                  disabled={isGeneratingStoryboard}
+                >
+                  {isGeneratingStoryboard ? "AI 生成中..." : "AI 生成分镜"}
+                </Button>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                AI 会结合项目提示词、提示词库内容、模特/产品设定和参考图一起生成分镜。
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <Label>当前镜头参考图</Label>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    每个分镜可独立选择不同参考图，当前操作仅作用于已选镜头。
+                  </p>
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  已选 {activeScene?.referenceUrls.length ?? 0} 张
+                </span>
+              </div>
+
+              {availableReferences.length ? (
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {availableReferences.map((reference) => {
+                    const isActive = Boolean(activeScene?.referenceUrls.includes(reference.url))
+
+                    return (
+                      <button
+                        key={reference.id}
+                        type="button"
+                        onClick={() =>
+                          activeScene ? toggleReferenceForScene(activeScene.id, reference.url) : null
+                        }
+                        disabled={!activeScene}
+                        className={`space-y-3 rounded-2xl border p-3 text-left ${
+                          isActive ? "border-primary bg-primary/5" : "bg-background"
+                        }`}
+                      >
+                        <AssetPreview
+                          imageUrl={reference.url}
+                          aspectClassName="aspect-square"
+                          fallback="REF"
+                        />
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant={isActive ? "default" : "outline"}>
+                              {reference.label}
+                            </Badge>
+                            <Badge variant="secondary">{reference.category}</Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {isActive ? "已加入当前镜头" : "点击加入当前镜头"}
+                          </p>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed px-4 py-5 text-sm text-muted-foreground">
+                  当前没有可用参考图，可先在图片工作台生成视觉素材或从模特作品集中挑选。
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label>补充上传参考图</Label>
+              <Input
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={(event) =>
+                  setUploadedReferenceFiles(Array.from(event.target.files ?? []))
+                }
+              />
+              {uploadedReferenceFiles.length ? (
+                <div className="flex flex-wrap gap-2">
+                  {uploadedReferenceFiles.map((file) => (
+                    <Badge key={`${file.name}-${file.size}`} variant="outline">
+                      {file.name}
+                    </Badge>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="space-y-4 rounded-2xl border bg-muted/20 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-medium">分镜时间轴</h3>
+                  <p className="text-xs text-muted-foreground">
+                    拖动镜头条目可调整先后顺序，时长会同步影响时间轴比例。
+                  </p>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={addScene}>
+                  新增镜头
+                </Button>
+              </div>
+
+              <div className="flex gap-3 overflow-x-auto pb-1">
+                {storyboardScenes.map((scene, index) => {
+                  const task = videoTasks.find((item) => item.sceneId === scene.id)
+
+                  return (
+                    <button
+                      key={scene.id}
+                      type="button"
+                      draggable
+                      onDragStart={() => setDraggingSceneId(scene.id)}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={() => {
+                        if (draggingSceneId) {
+                          reorderScenes(draggingSceneId, scene.id)
+                        }
+                        setDraggingSceneId(null)
+                      }}
+                      onDragEnd={() => setDraggingSceneId(null)}
+                      onClick={() => setActiveSceneId(scene.id)}
+                      className={`min-w-[180px] rounded-2xl border p-4 text-left ${
+                        activeSceneId === scene.id ? "border-primary bg-primary/5" : "bg-background"
+                      }`}
+                      style={{ flexBasis: `${Math.max(scene.duration * 14, 180)}px` }}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <Badge variant="outline">#{index + 1}</Badge>
+                        <span className="text-xs text-muted-foreground">{scene.duration}s</span>
+                      </div>
+                      <p className="mt-3 line-clamp-2 text-sm font-medium">{scene.title}</p>
+                      <p className="mt-2 line-clamp-3 text-xs text-muted-foreground">
+                        {scene.visualPrompt}
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {task?.videoUrl ? (
+                          <Badge>已完成</Badge>
+                        ) : task?.status === "processing" ? (
+                          <Badge variant="secondary">生成中</Badge>
+                        ) : null}
+                        <Badge variant="outline">{scene.soundMode}</Badge>
+                        <Badge variant="outline">{scene.aspectRatio}</Badge>
+                        <Badge variant="outline">参考 {scene.referenceUrls.length}</Badge>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 className="font-medium">分镜脚本管理</h3>
+                <div className="flex gap-2">
+                  {activeScene ? (
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={() =>
-                        setActiveSceneId(
-                          storyboardScenes[Math.max(0, activeSceneIndex - 1)]?.id ?? activeScene.id
-                        )
+                      onClick={() => generateVideosForScenes([activeScene])}
+                      disabled={
+                        !canGenerate ||
+                        isSubmittingVideos ||
+                        (activeScene.referenceUrls.length === 0 &&
+                          uploadedReferenceFiles.length === 0)
                       }
-                      disabled={activeSceneIndex <= 0}
                     >
-                      上一镜头
+                      生成当前镜头
                     </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        setActiveSceneId(
-                          storyboardScenes[
-                            Math.min(storyboardScenes.length - 1, activeSceneIndex + 1)
-                          ]?.id ?? activeScene.id
-                        )
-                      }
-                      disabled={activeSceneIndex >= storyboardScenes.length - 1}
-                    >
-                      下一镜头
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        setStoryboardScenes((current) => [
-                          ...current,
-                          createStoryboardScene(current.length, {
-                            ...activeScene,
-                            id: createSceneId(),
-                            title: `${activeScene.title} 复制`,
-                          }),
-                        ])
-                      }
-                    >
-                      复制
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => removeScene(activeScene.id)}
-                      disabled={storyboardScenes.length === 1}
-                    >
-                      删除
-                    </Button>
-                  </div>
+                  ) : null}
+                  <Button
+                    type="button"
+                    onClick={() => generateVideosForScenes(storyboardScenes)}
+                    disabled={!canGenerate || isSubmittingVideos || storyboardScenes.length === 0}
+                  >
+                    {isSubmittingVideos ? "提交中..." : "生成全部镜头"}
+                  </Button>
                 </div>
+              </div>
 
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>镜头标题</Label>
-                    <Input
-                      value={activeScene.title}
-                      onChange={(event) =>
-                        updateScene(activeScene.id, { title: event.target.value })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>镜头时长（秒）</Label>
-                    <Input
-                      type="number"
-                      min={1}
-                      max={12}
-                      value={activeScene.duration}
-                      onChange={(event) =>
-                        updateScene(activeScene.id, {
-                          duration: Number(event.target.value || 4),
-                        })
-                      }
-                    />
-                  </div>
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>声音开关</Label>
-                    <select
-                      value={activeScene.soundMode}
-                      onChange={(event) =>
-                        updateScene(activeScene.id, {
-                          soundMode: event.target.value as VideoSoundMode,
-                        })
-                      }
-                      className={selectClassName()}
-                    >
-                      {VIDEO_SOUND_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.value}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>视频比例</Label>
-                    <select
-                      value={activeScene.aspectRatio}
-                      onChange={(event) =>
-                        updateScene(activeScene.id, {
-                          aspectRatio: event.target.value as VideoAspectRatio,
-                        })
-                      }
-                      className={selectClassName()}
-                    >
-                      {VIDEO_ASPECT_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.value}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <Label>镜头提示词</Label>
-                    <span className="text-xs text-muted-foreground">
-                      可直接补充，也可从提示词库插入
-                    </span>
-                  </div>
-                  <Textarea
-                    value={composeScenePromptInput(activeScene)}
-                    onChange={(event) =>
-                      updateScene(activeScene.id, {
-                        visualPrompt: event.target.value,
-                        camera: "",
-                        motion: "",
-                        transition: "",
-                        voiceover: "",
-                      })
-                    }
-                    className="min-h-36"
-                  />
-                </div>
-
-                <div className="space-y-3 rounded-2xl border bg-muted/20 p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-sm font-medium">当前镜头已选参考图</p>
-                    <span className="text-xs text-muted-foreground">
-                      {activeSceneReferenceLabels.length
-                        ? activeSceneReferenceLabels.join("、")
-                        : "尚未为当前镜头选择参考图"}
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {activeScene.referenceUrls.length ? (
-                      activeScene.referenceUrls.map((url, index) => (
-                        <Badge key={`${activeScene.id}-${url}-${index}`} variant="outline">
-                          参考图 {index + 1}
-                        </Badge>
-                      ))
-                    ) : (
-                      <span className="text-sm text-muted-foreground">
-                        当前镜头还没有参考图。
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="space-y-3 rounded-2xl border bg-muted/20 p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-sm font-medium">从提示词库添加</p>
-                    <span className="text-xs text-muted-foreground">
-                      {selectedInstructions.length
-                        ? "优先显示已启用提示词"
-                        : "当前显示全部提示词"}
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {promptLibraryItems.length ? (
-                      promptLibraryItems.map((instruction) => (
+              {storyboardScenes.length ? (
+                activeScene ? (
+                  <div className="space-y-4 rounded-2xl border bg-card p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline">镜头 {activeSceneIndex + 1}</Badge>
+                        {activeSceneTask?.status === "processing" ? (
+                          <Badge variant="secondary">
+                            生成中
+                            {typeof activeSceneTask.progress === "number"
+                              ? ` ${activeSceneTask.progress}%`
+                              : ""}
+                          </Badge>
+                        ) : null}
+                        {activeSceneTask?.videoUrl ? <Badge>可预览</Badge> : null}
+                      </div>
+                      <div className="flex gap-2">
                         <Button
-                          key={`${activeScene.id}-${instruction.id}`}
                           type="button"
                           variant="outline"
                           size="sm"
                           onClick={() =>
-                            updateScene(activeScene.id, {
-                              visualPrompt: appendPromptBlock(
-                                composeScenePromptInput(activeScene),
-                                `提示词库：${instruction.title}\n${instruction.content}`
-                              ),
-                              camera: "",
-                              motion: "",
-                              transition: "",
-                              voiceover: "",
-                            })
+                            setActiveSceneId(
+                              storyboardScenes[Math.max(0, activeSceneIndex - 1)]?.id ?? activeScene.id
+                            )
+                          }
+                          disabled={activeSceneIndex <= 0}
+                        >
+                          上一镜头
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            setActiveSceneId(
+                              storyboardScenes[
+                                Math.min(storyboardScenes.length - 1, activeSceneIndex + 1)
+                              ]?.id ?? activeScene.id
+                            )
+                          }
+                          disabled={activeSceneIndex >= storyboardScenes.length - 1}
+                        >
+                          下一镜头
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            setStoryboardScenes((current) => [
+                              ...current,
+                              createStoryboardScene(current.length, {
+                                ...activeScene,
+                                id: createSceneId(),
+                                title: `${activeScene.title} 复制`,
+                              }),
+                            ])
                           }
                         >
-                          添加 {instruction.title}
+                          复制
                         </Button>
-                      ))
-                    ) : (
-                      <span className="text-sm text-muted-foreground">
-                        暂无可插入的提示词，请先在提示词库中创建内容。
-                      </span>
-                    )}
-                  </div>
-                </div>
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => removeScene(activeScene.id)}
+                          disabled={storyboardScenes.length === 1}
+                        >
+                          删除
+                        </Button>
+                      </div>
+                    </div>
 
-                {activeSceneTask?.error ? (
-                  <div className="rounded-2xl border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-                    {activeSceneTask.error}
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>镜头标题</Label>
+                        <Input
+                          value={activeScene.title}
+                          onChange={(event) =>
+                            updateScene(activeScene.id, { title: event.target.value })
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>镜头时长（秒）</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={12}
+                          value={activeScene.duration}
+                          onChange={(event) =>
+                            updateScene(activeScene.id, {
+                              duration: Number(event.target.value || 4),
+                            })
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>声音开关</Label>
+                        <select
+                          value={activeScene.soundMode}
+                          onChange={(event) =>
+                            updateScene(activeScene.id, {
+                              soundMode: event.target.value as VideoSoundMode,
+                            })
+                          }
+                          className={selectClassName()}
+                        >
+                          {VIDEO_SOUND_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.value}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>视频比例</Label>
+                        <select
+                          value={activeScene.aspectRatio}
+                          onChange={(event) =>
+                            updateScene(activeScene.id, {
+                              aspectRatio: event.target.value as VideoAspectRatio,
+                            })
+                          }
+                          className={selectClassName()}
+                        >
+                          {VIDEO_ASPECT_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.value}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <Label>镜头提示词</Label>
+                        <span className="text-xs text-muted-foreground">
+                          可直接补充，也可从提示词库插入
+                        </span>
+                      </div>
+                      <Textarea
+                        value={composeScenePromptInput(activeScene)}
+                        onChange={(event) =>
+                          updateScene(activeScene.id, {
+                            visualPrompt: event.target.value,
+                            camera: "",
+                            motion: "",
+                            transition: "",
+                            voiceover: "",
+                          })
+                        }
+                        className="min-h-36"
+                      />
+                    </div>
+
+                    <div className="space-y-3 rounded-2xl border bg-muted/20 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-medium">当前镜头已选参考图</p>
+                        <span className="text-xs text-muted-foreground">
+                          {activeSceneReferenceLabels.length
+                            ? activeSceneReferenceLabels.join("、")
+                            : "尚未为当前镜头选择参考图"}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {activeScene.referenceUrls.length ? (
+                          activeScene.referenceUrls.map((url, index) => (
+                            <Badge key={`${activeScene.id}-${url}-${index}`} variant="outline">
+                              参考图 {index + 1}
+                            </Badge>
+                          ))
+                        ) : (
+                          <span className="text-sm text-muted-foreground">
+                            当前镜头还没有参考图。
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-3 rounded-2xl border bg-muted/20 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-medium">从提示词库添加</p>
+                        <span className="text-xs text-muted-foreground">
+                          {selectedInstructions.length
+                            ? "优先显示已启用提示词"
+                            : "当前显示全部提示词"}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {promptLibraryItems.length ? (
+                          promptLibraryItems.map((instruction) => (
+                            <Button
+                              key={`${activeScene.id}-${instruction.id}`}
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                updateScene(activeScene.id, {
+                                  visualPrompt: appendPromptBlock(
+                                    composeScenePromptInput(activeScene),
+                                    `提示词库：${instruction.title}\n${instruction.content}`
+                                  ),
+                                  camera: "",
+                                  motion: "",
+                                  transition: "",
+                                  voiceover: "",
+                                })
+                              }
+                            >
+                              添加 {instruction.title}
+                            </Button>
+                          ))
+                        ) : (
+                          <span className="text-sm text-muted-foreground">
+                            暂无可插入的提示词，请先在提示词库中创建内容。
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {activeSceneTask?.error ? (
+                      <div className="rounded-2xl border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                        {activeSceneTask.error}
+                      </div>
+                    ) : null}
                   </div>
-                ) : null}
-              </div>
-            ) : null
-          ) : (
-            <div className="rounded-2xl border border-dashed px-4 py-8 text-sm text-muted-foreground">
-              暂无分镜，请先新增镜头或使用 AI 自动生成。
+                ) : null
+              ) : (
+                <div className="rounded-2xl border border-dashed px-4 py-8 text-sm text-muted-foreground">
+                  暂无分镜，请先新增镜头或使用 AI 自动生成。
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </>
+        ) : (
+          <div className="rounded-2xl border border-dashed px-6 py-10 text-sm text-muted-foreground">
+            请先在上方创建项目或从项目面板打开一个已有项目，随后再编辑项目提示词、分镜和视频任务。
+          </div>
+        )}
 
         {storyboardError ? (
           <div className="rounded-2xl border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
@@ -2502,220 +2666,232 @@ function VideoStudio({
           </p>
         </div>
 
-        <div className="space-y-3 rounded-2xl border bg-muted/20 p-4">
-          <div className="flex items-center justify-between gap-3">
-            <h4 className="font-medium">项目详情</h4>
-            <Badge variant={currentProjectSummary ? "default" : "outline"}>
-              {getProjectStatusLabel(currentProjectSummary?.status ?? "draft")}
-            </Badge>
+        {isCreatingProject ? (
+          <div className="rounded-2xl border border-dashed px-6 py-12 text-sm text-muted-foreground">
+            当前处于项目创建阶段。创建完成后，这里会展示项目详情、视频预览和镜头任务进度。
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-2xl border bg-background p-3">
-              <p className="text-xs text-muted-foreground">项目名称</p>
-              <p className="mt-1 font-medium">{projectTitle || "未命名项目"}</p>
-            </div>
-            <div className="rounded-2xl border bg-background p-3">
-              <p className="text-xs text-muted-foreground">最近保存</p>
-              <p className="mt-1 font-medium">
-                {lastAutoSavedAt ? formatRelativeTime(lastAutoSavedAt) : "尚未保存"}
-              </p>
-            </div>
-            <div className="rounded-2xl border bg-background p-3">
-              <p className="text-xs text-muted-foreground">分镜 / 任务</p>
-              <p className="mt-1 font-medium">
-                {storyboardScenes.length} / {videoTasks.length}
-              </p>
-            </div>
-            <div className="rounded-2xl border bg-background p-3">
-              <p className="text-xs text-muted-foreground">绑定资源</p>
-              <p className="mt-1 font-medium">
-                模特 {selectedModel ? "1" : "0"} / 产品 {selectedProduct ? "1" : "0"}
-              </p>
-            </div>
-          </div>
-          <div className="grid gap-3 lg:grid-cols-2">
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-muted-foreground">分镜概览</p>
-              {storyboardScenes.length ? (
+        ) : isEditingProject ? (
+          <>
+            <div className="space-y-3 rounded-2xl border bg-muted/20 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <h4 className="font-medium">项目详情</h4>
+                <Badge variant={currentProjectSummary ? "default" : "outline"}>
+                  {getProjectStatusLabel(currentProjectSummary?.status ?? "draft")}
+                </Badge>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border bg-background p-3">
+                  <p className="text-xs text-muted-foreground">项目名称</p>
+                  <p className="mt-1 font-medium">{projectTitle || "未命名项目"}</p>
+                </div>
+                <div className="rounded-2xl border bg-background p-3">
+                  <p className="text-xs text-muted-foreground">最近保存</p>
+                  <p className="mt-1 font-medium">
+                    {lastAutoSavedAt ? formatRelativeTime(lastAutoSavedAt) : "尚未保存"}
+                  </p>
+                </div>
+                <div className="rounded-2xl border bg-background p-3">
+                  <p className="text-xs text-muted-foreground">分镜 / 任务</p>
+                  <p className="mt-1 font-medium">
+                    {storyboardScenes.length} / {videoTasks.length}
+                  </p>
+                </div>
+                <div className="rounded-2xl border bg-background p-3">
+                  <p className="text-xs text-muted-foreground">绑定资源</p>
+                  <p className="mt-1 font-medium">
+                    模特 {selectedModel ? "1" : "0"} / 产品 {selectedProduct ? "1" : "0"}
+                  </p>
+                </div>
+              </div>
+              <div className="grid gap-3 lg:grid-cols-2">
                 <div className="space-y-2">
-                  {storyboardScenes.slice(0, 4).map((scene, index) => (
-                    <div
-                      key={scene.id}
-                      className="flex items-center justify-between rounded-2xl border bg-background px-3 py-2 text-sm"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate font-medium">
-                          #{index + 1} {scene.title}
-                        </p>
-                        <p className="text-xs text-muted-foreground">{scene.duration} 秒</p>
-                      </div>
-                      <Badge variant="outline">{scene.aspectRatio}</Badge>
+                  <p className="text-xs font-medium text-muted-foreground">分镜概览</p>
+                  {storyboardScenes.length ? (
+                    <div className="space-y-2">
+                      {storyboardScenes.slice(0, 4).map((scene, index) => (
+                        <div
+                          key={scene.id}
+                          className="flex items-center justify-between rounded-2xl border bg-background px-3 py-2 text-sm"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">
+                              #{index + 1} {scene.title}
+                            </p>
+                            <p className="text-xs text-muted-foreground">{scene.duration} 秒</p>
+                          </div>
+                          <Badge variant="outline">{scene.aspectRatio}</Badge>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  ) : (
+                    <div className="rounded-2xl border border-dashed px-3 py-4 text-sm text-muted-foreground">
+                      暂无分镜。
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <div className="rounded-2xl border border-dashed px-3 py-4 text-sm text-muted-foreground">
-                  暂无分镜。
-                </div>
-              )}
-            </div>
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-muted-foreground">任务概览</p>
-              {videoTasks.length ? (
                 <div className="space-y-2">
-                  {videoTasks.slice(0, 4).map((task) => (
-                    <div
-                      key={task.taskId}
-                      className="flex items-center justify-between rounded-2xl border bg-background px-3 py-2 text-sm"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate font-medium">{task.sceneTitle || "未命名镜头"}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {task.videoUrl
-                            ? "已生成可预览"
-                            : task.status === "processing"
-                              ? typeof task.progress === "number"
-                                ? `进度 ${task.progress}%`
-                                : "生成中"
-                              : task.status === "failed"
-                                ? task.error || "生成失败"
-                                : "待生成"}
-                        </p>
-                      </div>
-                      <Badge
-                        variant={
-                          task.status === "failed"
-                            ? "destructive"
-                            : task.status === "processing"
-                              ? "secondary"
-                              : task.videoUrl
-                                ? "default"
-                                : "outline"
-                        }
-                      >
-                        {task.status === "failed"
-                          ? "失败"
-                          : task.status === "processing"
-                            ? "处理中"
-                            : task.videoUrl
-                              ? "已完成"
-                              : "待生成"}
-                      </Badge>
+                  <p className="text-xs font-medium text-muted-foreground">任务概览</p>
+                  {videoTasks.length ? (
+                    <div className="space-y-2">
+                      {videoTasks.slice(0, 4).map((task) => (
+                        <div
+                          key={task.taskId}
+                          className="flex items-center justify-between rounded-2xl border bg-background px-3 py-2 text-sm"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">{task.sceneTitle || "未命名镜头"}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {task.videoUrl
+                                ? "已生成可预览"
+                                : task.status === "processing"
+                                  ? typeof task.progress === "number"
+                                    ? `进度 ${task.progress}%`
+                                    : "生成中"
+                                  : task.status === "failed"
+                                    ? task.error || "生成失败"
+                                    : "待生成"}
+                            </p>
+                          </div>
+                          <Badge
+                            variant={
+                              task.status === "failed"
+                                ? "destructive"
+                                : task.status === "processing"
+                                  ? "secondary"
+                                  : task.videoUrl
+                                    ? "default"
+                                    : "outline"
+                            }
+                          >
+                            {task.status === "failed"
+                              ? "失败"
+                              : task.status === "processing"
+                                ? "处理中"
+                                : task.videoUrl
+                                  ? "已完成"
+                                  : "待生成"}
+                          </Badge>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  ) : (
+                    <div className="rounded-2xl border border-dashed px-3 py-4 text-sm text-muted-foreground">
+                      暂无任务。
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <div className="rounded-2xl border border-dashed px-3 py-4 text-sm text-muted-foreground">
-                  暂无任务。
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-3 rounded-2xl border bg-muted/20 p-4">
-          <div className="flex items-center justify-between gap-3">
-            <h4 className="font-medium">主预览窗</h4>
-            {activePreviewTask?.videoUrl ? (
-              <a
-                href={activePreviewTask.videoUrl}
-                target="_blank"
-                rel="noreferrer"
-                download
-                className="text-sm text-primary underline-offset-4 hover:underline"
-              >
-                下载当前片段
-              </a>
-            ) : null}
-          </div>
-          {activePreviewTask?.videoUrl ? (
-            <div className="space-y-3">
-              <video
-                key={activePreviewTask.videoUrl}
-                src={activePreviewTask.videoUrl}
-                controls
-                playsInline
-                className="aspect-[9/16] w-full rounded-2xl border bg-black object-cover"
-              />
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <Badge>{activePreviewTask.sceneTitle}</Badge>
-                  <Badge variant="outline">{activePreviewTask.duration}s</Badge>
-                </div>
-                <p className="line-clamp-4 text-xs text-muted-foreground">
-                  {activePreviewTask.prompt}
-                </p>
               </div>
             </div>
-          ) : (
-            <div className="rounded-2xl border border-dashed px-4 py-10 text-sm text-muted-foreground">
-              生成完成后，视频会出现在这里供播放与下载。
-            </div>
-          )}
-        </div>
 
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h4 className="font-medium">镜头任务面板</h4>
-            <span className="text-xs text-muted-foreground">
-              已完成 {completedTasks.length} / {storyboardScenes.length}
-            </span>
-          </div>
-          {storyboardScenes.length ? (
-            <div className="grid gap-3">
-              {storyboardScenes.map((scene, index) => {
-                const task = videoTasks.find((item) => item.sceneId === scene.id)
-
-                return (
-                  <button
-                    key={scene.id}
-                    type="button"
-                    onClick={() => {
-                      setActiveSceneId(scene.id)
-                      if (task?.videoUrl) {
-                        setActivePreviewSceneId(scene.id)
-                      }
-                    }}
-                    className={`space-y-3 rounded-2xl border p-4 text-left ${
-                      activeSceneId === scene.id ? "border-primary bg-primary/5" : "bg-background"
-                    }`}
+            <div className="space-y-3 rounded-2xl border bg-muted/20 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <h4 className="font-medium">主预览窗</h4>
+                {activePreviewTask?.videoUrl ? (
+                  <a
+                    href={activePreviewTask.videoUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    download
+                    className="text-sm text-primary underline-offset-4 hover:underline"
                   >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline">#{index + 1}</Badge>
-                        <span className="text-sm font-medium">{scene.title}</span>
-                      </div>
-                      {task?.videoUrl ? (
-                        <Badge>已生成</Badge>
-                      ) : task?.status === "processing" ? (
-                        <Badge variant="secondary">排队 / 渲染中</Badge>
-                      ) : task?.status === "failed" ? (
-                        <Badge variant="destructive">生成失败</Badge>
-                      ) : (
-                        <Badge variant="outline">待生成</Badge>
-                      )}
+                    下载当前片段
+                  </a>
+                ) : null}
+              </div>
+              {activePreviewTask?.videoUrl ? (
+                <div className="space-y-3">
+                  <video
+                    key={activePreviewTask.videoUrl}
+                    src={activePreviewTask.videoUrl}
+                    controls
+                    playsInline
+                    className="aspect-[9/16] w-full rounded-2xl border bg-black object-cover"
+                  />
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Badge>{activePreviewTask.sceneTitle}</Badge>
+                      <Badge variant="outline">{activePreviewTask.duration}s</Badge>
                     </div>
-                    <p className="line-clamp-3 text-xs text-muted-foreground">
-                      {scene.visualPrompt}
+                    <p className="line-clamp-4 text-xs text-muted-foreground">
+                      {activePreviewTask.prompt}
                     </p>
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span>{scene.duration} 秒</span>
-                      {task?.videoUrl ? (
-                        <span>点击切换主预览</span>
-                      ) : task?.status === "processing" ? (
-                        <span>
-                          {typeof task.progress === "number"
-                            ? `进度 ${task.progress}%`
-                            : "已提交视频任务"}
-                        </span>
-                      ) : null}
-                    </div>
-                  </button>
-                )
-              })}
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed px-4 py-10 text-sm text-muted-foreground">
+                  生成完成后，视频会出现在这里供播放与下载。
+                </div>
+              )}
             </div>
-          ) : null}
-        </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="font-medium">镜头任务面板</h4>
+                <span className="text-xs text-muted-foreground">
+                  已完成 {completedTasks.length} / {storyboardScenes.length}
+                </span>
+              </div>
+              {storyboardScenes.length ? (
+                <div className="grid gap-3">
+                  {storyboardScenes.map((scene, index) => {
+                    const task = videoTasks.find((item) => item.sceneId === scene.id)
+
+                    return (
+                      <button
+                        key={scene.id}
+                        type="button"
+                        onClick={() => {
+                          setActiveSceneId(scene.id)
+                          if (task?.videoUrl) {
+                            setActivePreviewSceneId(scene.id)
+                          }
+                        }}
+                        className={`space-y-3 rounded-2xl border p-4 text-left ${
+                          activeSceneId === scene.id ? "border-primary bg-primary/5" : "bg-background"
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline">#{index + 1}</Badge>
+                            <span className="text-sm font-medium">{scene.title}</span>
+                          </div>
+                          {task?.videoUrl ? (
+                            <Badge>已生成</Badge>
+                          ) : task?.status === "processing" ? (
+                            <Badge variant="secondary">排队 / 渲染中</Badge>
+                          ) : task?.status === "failed" ? (
+                            <Badge variant="destructive">生成失败</Badge>
+                          ) : (
+                            <Badge variant="outline">待生成</Badge>
+                          )}
+                        </div>
+                        <p className="line-clamp-3 text-xs text-muted-foreground">
+                          {scene.visualPrompt}
+                        </p>
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span>{scene.duration} 秒</span>
+                          {task?.videoUrl ? (
+                            <span>点击切换主预览</span>
+                          ) : task?.status === "processing" ? (
+                            <span>
+                              {typeof task.progress === "number"
+                                ? `进度 ${task.progress}%`
+                                : "已提交视频任务"}
+                            </span>
+                          ) : null}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : null}
+            </div>
+          </>
+        ) : (
+          <div className="rounded-2xl border border-dashed px-6 py-12 text-sm text-muted-foreground">
+            当前还没有打开任何影棚项目。请先在左侧创建项目或从项目面板打开一个已有项目，随后这里才会展示项目详情、预览和任务进度。
+          </div>
+        )}
 
         <div className="space-y-3">
           <h4 className="font-medium">当前绑定资源</h4>
