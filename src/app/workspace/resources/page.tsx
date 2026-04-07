@@ -2,6 +2,7 @@ import Link from "next/link"
 import { logout } from "@/app/actions/auth"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { WorkspaceNav } from "@/components/workspace-nav"
 import { requireUser } from "@/lib/auth"
 import { getResourceLibrarySnapshot } from "@/lib/resource-system"
 import { getRoleMeta } from "@/lib/user-system"
@@ -80,6 +81,8 @@ export default async function ResourceLibraryPage({
       </header>
 
       <main className="mx-auto flex max-w-7xl flex-col gap-8 px-6 py-10 lg:px-10">
+        <WorkspaceNav current="resources" role={currentUser.role} />
+
         <section className="flex flex-col md:flex-row gap-6 md:items-center justify-between">
           <div className="space-y-4 max-w-2xl">
             <div className="flex items-center gap-3">

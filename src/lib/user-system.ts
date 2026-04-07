@@ -65,6 +65,11 @@ export interface UserSystemSnapshot {
   }
 }
 
+export interface UserManagementSnapshot {
+  source: "database" | "unavailable"
+  users: AppUser[]
+}
+
 interface UserRecord {
   id: string
   name: string
@@ -91,6 +96,16 @@ interface CampaignRequestRecord {
 }
 
 interface CreateUserInput {
+  name: string
+  email: string
+  role: UserRole
+  company?: string | null
+  status?: UserStatus
+  password?: string
+}
+
+interface UpdateUserInput {
+  id: string
   name: string
   email: string
   role: UserRole
@@ -267,7 +282,14 @@ function normalizeText(value: string) {
   return value.trim()
 }
 
-function validateCreateUserInput(input: CreateUserInput) {
+function validateUserInput(input: {
+  name: string
+  email: string
+  role: UserRole
+  company?: string | null
+  status?: UserStatus
+  password?: string
+}) {
   const name = normalizeText(input.name)
   const email = normalizeText(input.email).toLowerCase()
   const company = input.company ? normalizeText(input.company) : null
@@ -304,6 +326,27 @@ function validateCreateUserInput(input: CreateUserInput) {
     company,
     status,
     password: input.password?.trim() || "",
+  }
+}
+
+function validateCreateUserInput(input: CreateUserInput) {
+  return validateUserInput(input)
+}
+
+function validateUpdateUserInput(input: UpdateUserInput) {
+  const id = normalizeText(input.id)
+
+  if (!id) {
+    throw new Error("缺少用户 ID。")
+  }
+
+  if (id === ADMIN_USER_ID) {
+    throw new Error("系统 admin 不可编辑。")
+  }
+
+  return {
+    id,
+    ...validateUserInput(input),
   }
 }
 
@@ -388,6 +431,40 @@ export async function getUserSystemSnapshot(): Promise<UserSystemSnapshot> {
   }
 }
 
+export async function getUserManagementSnapshot(): Promise<UserManagementSnapshot> {
+  if (!isDatabaseConfigured()) {
+    return {
+      source: "unavailable",
+      users: [getAdminUser()],
+    }
+  }
+
+  try {
+    const users = await db
+      .select({
+        id: appUsers.id,
+        name: appUsers.name,
+        email: appUsers.email,
+        role: appUsers.role,
+        status: appUsers.status,
+        company: appUsers.company,
+        createdAt: appUsers.createdAt,
+      })
+      .from(appUsers)
+      .orderBy(desc(appUsers.createdAt))
+
+    return {
+      source: "database",
+      users: [getAdminUser(), ...users.map(mapUserRecord)],
+    }
+  } catch {
+    return {
+      source: "unavailable",
+      users: [getAdminUser()],
+    }
+  }
+}
+
 export async function createUser(input: CreateUserInput): Promise<AppUser> {
   if (!isDatabaseConfigured()) {
     throw new Error("DATABASE_URL 未配置，当前环境无法写入用户。")
@@ -432,6 +509,84 @@ export async function createUser(input: CreateUserInput): Promise<AppUser> {
     }
 
     throw error
+  }
+}
+
+export async function updateUser(input: UpdateUserInput): Promise<AppUser> {
+  if (!isDatabaseConfigured()) {
+    throw new Error("DATABASE_URL 未配置，当前环境无法写入用户。")
+  }
+
+  const validatedInput = validateUpdateUserInput(input)
+
+  if (validatedInput.role === "admin") {
+    throw new Error("admin 是唯一系统账号，不允许通过数据库维护。")
+  }
+
+  try {
+    const values = {
+      name: validatedInput.name,
+      email: validatedInput.email,
+      role: validatedInput.role,
+      company: validatedInput.company,
+      status: validatedInput.status,
+      ...(validatedInput.password
+        ? { passwordHash: await hashPassword(validatedInput.password) }
+        : {}),
+    }
+
+    const [updatedUser] = await db
+      .update(appUsers)
+      .set(values)
+      .where(eq(appUsers.id, validatedInput.id))
+      .returning({
+        id: appUsers.id,
+        name: appUsers.name,
+        email: appUsers.email,
+        role: appUsers.role,
+        status: appUsers.status,
+        company: appUsers.company,
+        createdAt: appUsers.createdAt,
+      })
+
+    if (!updatedUser) {
+      throw new Error("用户不存在。")
+    }
+
+    return mapUserRecord(updatedUser)
+  } catch (error: unknown) {
+    const errorCode = getErrorCode(error)
+
+    if (errorCode === "23505") {
+      throw new Error("该邮箱已存在。")
+    }
+
+    throw error
+  }
+}
+
+export async function deleteUser(userId: string) {
+  if (!isDatabaseConfigured()) {
+    throw new Error("DATABASE_URL 未配置，当前环境无法写入用户。")
+  }
+
+  const normalizedUserId = normalizeText(userId)
+
+  if (!normalizedUserId) {
+    throw new Error("缺少用户 ID。")
+  }
+
+  if (normalizedUserId === ADMIN_USER_ID) {
+    throw new Error("系统 admin 不可删除。")
+  }
+
+  const [deletedUser] = await db
+    .delete(appUsers)
+    .where(eq(appUsers.id, normalizedUserId))
+    .returning({ id: appUsers.id })
+
+  if (!deletedUser) {
+    throw new Error("用户不存在。")
   }
 }
 

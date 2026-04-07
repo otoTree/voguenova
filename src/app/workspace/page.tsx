@@ -10,6 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { WorkspaceNav } from "@/components/workspace-nav"
 import {
   Table,
   TableBody,
@@ -118,6 +119,8 @@ export default async function WorkspacePage() {
       </header>
 
       <main className="mx-auto flex max-w-7xl flex-col gap-12 px-6 py-16 lg:px-10">
+        <WorkspaceNav current="overview" role={currentUser.role} />
+
         <section className="grid gap-8 border border-black bg-white p-10 lg:grid-cols-[1.2fr_0.8fr]">
           <div className="space-y-6">
             <Badge variant="outline" className="rounded-none border-black uppercase tracking-widest text-xs px-3 py-1">
@@ -140,14 +143,26 @@ export default async function WorkspacePage() {
               ))}
             </div>
             <div>
-              <Button
-                variant="outline"
-                className="rounded-none border-black px-6 py-6 text-sm uppercase tracking-widest hover:bg-neutral-100 transition-colors"
-                render={<Link href="/workspace/resources" />}
-                nativeButton={false}
-              >
-                进入资源库
-              </Button>
+              <div className="flex flex-wrap gap-3">
+                <Button
+                  variant="outline"
+                  className="rounded-none border-black px-6 py-6 text-sm uppercase tracking-widest hover:bg-neutral-100 transition-colors"
+                  render={<Link href="/workspace/resources" />}
+                  nativeButton={false}
+                >
+                  进入资源库
+                </Button>
+                {currentUser.role === "admin" ? (
+                  <Button
+                    variant="outline"
+                    className="rounded-none border-black px-6 py-6 text-sm uppercase tracking-widest hover:bg-neutral-100 transition-colors"
+                    render={<Link href="/workspace/users" />}
+                    nativeButton={false}
+                  >
+                    管理账号
+                  </Button>
+                ) : null}
+              </div>
             </div>
           </div>
 
